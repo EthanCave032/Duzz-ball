@@ -1,0 +1,412 @@
+import pygame
+import math
+import sys
+import random
+
+# Initialize pygame
+pygame.init()
+
+# Load and play background music
+pygame.mixer.music.load("music.mp3.mp3")
+pygame.mixer.music.play(-1)  # Loop forever
+pygame.mixer.music.set_volume(0.5)  # 50% volume
+# Game constants
+WIDTH, HEIGHT = 1000, 700
+BALL_RADIUS = 20
+GRAVITY = 0.5
+MAX_LEVEL = 5
+POWERUP_RADIUS = 15
+POWERUP_DURATION = 300
+BOSS_PROJECTILE_SPEED = 12
+BOSS_HEALTH = 20
+PLAYER_HEALTH = 3
+
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+ORANGE = (255, 165, 0)
+RED = (255, 0, 0)
+BLUE = (0, 0, 255)
+GREEN = (0, 255, 0)
+LEVEL_COLORS = [WHITE, (200, 255, 200), (200, 200, 255), (255, 230, 200), (255, 200, 200), (220, 220, 220)]
+
+# Create screen
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Duzz Ball")
+
+# Load assets
+try:
+    ball_img = pygame.image.load("basketball.png")
+    ball_img = pygame.transform.scale(ball_img, (BALL_RADIUS*2, BALL_RADIUS*2))
+except:
+    ball_img = pygame.Surface((BALL_RADIUS*2, BALL_RADIUS*2), pygame.SRCALPHA)
+    pygame.draw.circle(ball_img, ORANGE, (BALL_RADIUS, BALL_RADIUS), BALL_RADIUS)
+
+try:
+    player_img = pygame.image.load("player.png")
+    player_img = pygame.transform.scale(player_img, (60, 80))
+except:
+    player_img = pygame.Surface((60, 80))
+    player_img.fill(BLUE)
+
+try:
+    boss_img = pygame.image.load("boss.png")
+    boss_img = pygame.transform.scale(boss_img, (200, 200))
+except:
+    boss_img = pygame.Surface((200, 200))
+    boss_img.fill((100, 100, 100))
+# Load background images
+try:
+    menu_bg = pygame.image.load("menu_background.png")
+    menu_bg = pygame.transform.scale(menu_bg, (WIDTH, HEIGHT))
+except:
+    menu_bg = None
+
+try:
+    boss_bg = pygame.image.load("boss_background.png")
+    boss_bg = pygame.transform.scale(boss_bg, (WIDTH, HEIGHT))
+except:
+    boss_bg = None
+# Win/Lose background images
+try:
+    win_bg = pygame.image.load("win_background.png")
+    win_bg = pygame.transform.scale(win_bg, (WIDTH, HEIGHT))
+except:
+    win_bg = None
+
+try:
+    lose_bg = pygame.image.load("lose_background.png")
+    lose_bg = pygame.transform.scale(lose_bg, (WIDTH, HEIGHT))
+except:
+    lose_bg = None
+#classes
+
+class HoopTarget:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 50, 10)
+        self.hit = False
+        self.speed = random.choice([-2, 2])  # Random left or right
+
+    def move(self):
+        if not self.hit:
+            self.rect.x += self.speed
+            if self.rect.left <= 50 or self.rect.right >= WIDTH - 50:
+                self.speed *= -1  # Bounce at screen edges
+
+    def draw(self):
+        if not self.hit:
+            pygame.draw.rect(screen, RED, self.rect)  # You can swap this with an image later
+# Font setup
+font = pygame.font.Font(None, 50)
+small_font = pygame.font.Font(None, 36)
+
+# Volume slider (global)
+slider_rect = pygame.Rect(50, HEIGHT - 50, 200, 10) #was -70
+slider_knob_x = slider_rect.x + 100  # Starts at 50% volume
+volume = 0.5
+pygame.mixer.music.set_volume(volume)
+
+def draw_health_bar(health, max_health, x, y):
+    max_width = 200
+    height = 20
+    pygame.draw.rect(screen, RED, (x, y, max_width, height))
+    pygame.draw.rect(screen, GREEN, (x, y, max_width * (health / max_health), height))
+
+def draw_volume_slider():
+    # Slider bar
+    pygame.draw.rect(screen, WHITE, slider_rect)
+    # Slider knob
+    pygame.draw.circle(screen, RED, (slider_knob_x, slider_rect.y + slider_rect.height // 2), 10)
+    # Label
+    label = small_font.render("Music Volume", True, WHITE)
+    screen.blit(label, (slider_rect.x, slider_rect.y - 30))
+    # volume slider
+    volume_percent = int(volume * 100)
+    vol_text = small_font.render(f"{volume_percent}%", True, WHITE)
+    screen.blit(vol_text, (slider_rect.x + slider_rect.width + 10, slider_rect.y - 5))
+
+def draw_player_health(player_health):
+    draw_health_bar(player_health, PLAYER_HEALTH, WIDTH // 2 - 100, HEIGHT - 25) #was 30
+    draw_volume_slider()
+def draw_boss_health(boss_health):
+    draw_health_bar(boss_health, BOSS_HEALTH, WIDTH // 2 - 100, 20)
+
+def reset_ball():
+    global ball_x, ball_y, velocity_x, velocity_y, shooting
+    ball_x, ball_y = WIDTH // 2, HEIGHT - 100
+    velocity_x, velocity_y = 0, 0
+    shooting = False
+def end_screen(message):
+    while True:
+        if message == "You Win!" and win_bg:
+            screen.blit(win_bg, (0, 0))
+        elif message == "You Lose!" and lose_bg:
+            screen.blit(lose_bg, (0, 0))
+        else:
+            screen.fill(WHITE)
+
+        text = font.render(message, True, WHITE)
+        prompt = small_font.render("Press ENTER to return to main menu or ESC to quit", True, BLUE)
+        screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 3))
+        screen.blit(prompt, (WIDTH // 2 - prompt.get_width() // 2, HEIGHT // 2))
+
+        pygame.display.update()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN:
+                    return  # Go back to main menu
+                if event.key == pygame.K_ESCAPE:
+                    pygame.quit()
+                    sys.exit()
+
+def handle_volume_slider():
+    global slider_knob_x, volume
+    if pygame.mouse.get_pressed()[0]:  # Left mouse button
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        if slider_rect.collidepoint(mouse_x, mouse_y) or abs(mouse_x - slider_knob_x) < 15:
+            slider_knob_x = max(slider_rect.x, min(mouse_x, slider_rect.x + slider_rect.width))
+            volume = (slider_knob_x - slider_rect.x) / slider_rect.width
+            pygame.mixer.music.set_volume(volume)
+
+def main_menu():
+    while True:
+        if menu_bg:
+            screen.blit(menu_bg, (0, 0))
+        else:
+            screen.fill(WHITE)
+        screen.blit(font.render("Duzz Ball", True, WHITE), (WIDTH // 3, HEIGHT // 5))
+        screen.blit(small_font.render("Press 1-5 to select level", True, BLUE), (WIDTH // 4, HEIGHT // 2 - 50))
+        screen.blit(small_font.render("Press B for Boss Level", True, RED), (WIDTH // 4 + 20, HEIGHT // 2))
+        screen.blit(small_font.render("Press ESC to Quit", True, WHITE), (WIDTH // 4 + 40, HEIGHT // 2 + 50))
+
+        draw_volume_slider()
+        handle_volume_slider()
+        pygame.display.update()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key in [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5]:
+                    return int(event.unicode)
+                elif event.key == pygame.K_b:
+                    return "boss"
+                elif event.key == pygame.K_ESCAPE:
+                    pygame.quit()
+                    sys.exit()
+
+def game_loop(level):
+    global ball_x, ball_y, velocity_x, velocity_y, shooting
+    clock = pygame.time.Clock()
+    running = True
+    score = 0
+    hoop_x, hoop_y = WIDTH - 150, HEIGHT // 3
+    hoop_width = 50
+    hoop_speed = 2
+    shooting = False
+    ball_x, ball_y = WIDTH // 2, HEIGHT - 100
+    velocity_x, velocity_y = 0, 0
+    powerup_active = False
+    powerup_timer = 0
+    powerup_x, powerup_y = random.randint(100, WIDTH - 100), random.randint(100, HEIGHT - 200)
+    player_health = PLAYER_HEALTH
+    # Boss-specific
+    boss_health = BOSS_HEALTH
+    boss_stage = 1
+    shake_timer = 0
+    boss_stage = 1
+    boss_hit_timer = 0
+    boss_x, boss_y = WIDTH // 2 - 100, 100
+    boss_dx = 3 if boss_stage == 1 else 5 if boss_stage == 2 else 7
+    boss_projectiles = []
+    shoot_timer = 0
+    player_x = WIDTH // 2
+    player_speed = 5
+
+    targets = []
+
+    if isinstance(level, int):
+        level_layouts = {
+            1: [(400, 200)],
+            2: [(300, 250), (500, 250)],
+            3: [(250, 220), (450, 180), (650, 220)],
+            4: [(200, 250), (400, 150), (600, 250), (800, 200)],
+            5: [(250, 200), (400, 150), (550, 200), (700, 150), (850, 200)]
+        }
+        for pos in level_layouts.get(level, []):
+            targets.append(HoopTarget(*pos))
+    while running:
+        offset_x = random.randint(-5, 5) if shake_timer > 0 else 0
+        offset_y = random.randint(-5, 5) if shake_timer > 0 else 0
+        if shake_timer > 0:
+            shake_timer -= 1
+        if level == "boss" and boss_bg:
+            screen.blit(boss_bg, (0, 0))
+        else:
+            screen.fill(LEVEL_COLORS[min(level if isinstance(level, int) else MAX_LEVEL, MAX_LEVEL)])
+        screen_scroll = pygame.Surface((WIDTH, HEIGHT))
+        screen_scroll.blit(screen, (offset_x, offset_y))
+        screen.blit(screen_scroll, (0, 0))
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return
+                if event.key == pygame.K_SPACE and not shooting:
+                    ball_x = player_x + 30
+                    ball_y = HEIGHT - 100
+                    velocity_x = 0
+                    velocity_y = -25
+                    shooting = True
+
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_a] and player_x > 0:
+            player_x -= player_speed
+        if keys[pygame.K_d] and player_x < WIDTH - 60:
+            player_x += player_speed
+
+        if level != "boss":
+            hoop_x += hoop_speed
+            if hoop_x < 100 or hoop_x > WIDTH - 100:
+                hoop_speed *= -1
+
+        if shooting:
+            ball_y += velocity_y
+            velocity_y += GRAVITY
+
+            if ball_y > HEIGHT:
+                reset_ball()
+            for target in targets:
+                if not target.hit and pygame.Rect(ball_x, ball_y, BALL_RADIUS * 2, BALL_RADIUS * 2).colliderect(
+                        target.rect):
+                    target.hit = True
+                    score += 1
+                    reset_ball()
+
+        if not powerup_active and random.random() < 0.005:
+            powerup_x = random.randint(100, WIDTH - 100)
+            powerup_y = random.randint(100, HEIGHT - 200)
+            powerup_active = True
+            powerup_timer = POWERUP_DURATION
+
+        if powerup_active:
+            pygame.draw.circle(screen, GREEN, (powerup_x, powerup_y), POWERUP_RADIUS)
+            powerup_timer -= 1
+            if powerup_timer <= 0:
+                powerup_active = False
+            if math.hypot(ball_x - powerup_x, ball_y - powerup_y) < BALL_RADIUS + POWERUP_RADIUS:
+                score += 2
+                powerup_active = False
+        for target in targets:
+            target.move()
+            target.draw()
+
+        if level == "boss":
+            boss_x += boss_dx
+            if boss_x <= 0 or boss_x + 200 >= WIDTH:
+                boss_dx *= -1
+
+            shoot_timer += 1
+            if shoot_timer > 60:
+                if boss_stage == 1:
+                    boss_projectiles.append([boss_x + 100, boss_y + 200, RED])
+                elif boss_stage == 2:
+                    boss_projectiles.append([boss_x + 80, boss_y + 200, BLUE])
+                    boss_projectiles.append([boss_x + 120, boss_y + 200, RED])
+                elif boss_stage == 3:
+                    boss_projectiles.append([boss_x + 70, boss_y + 200, RED])
+                    boss_projectiles.append([boss_x + 100, boss_y + 200, ORANGE])
+                    boss_projectiles.append([boss_x + 130, boss_y + 200, BLUE])
+                shoot_timer = 0
+
+            for proj in boss_projectiles:
+                proj[1] += BOSS_PROJECTILE_SPEED
+                pygame.draw.circle(screen, proj[2], (int(proj[0]), int(proj[1])), 6)  # draw projectile
+                pygame.draw.circle(screen, proj[2], (int(proj[0]), int(proj[1]) - 10), 3)  # trail glow
+                player_y = HEIGHT -PLAYER_Y_OFFSET
+                if pygame.Rect(proj[0], proj[1], 10, 20).colliderect(pygame.Rect(player_x, player_y, 60, 80)):
+                    player_health -= 1
+                    boss_projectiles.remove(proj)
+
+            if shooting and pygame.Rect(ball_x, ball_y, BALL_RADIUS * 2, BALL_RADIUS * 2).colliderect(
+                    pygame.Rect(boss_x, boss_y, 200, 200)):
+                boss_health -= 1
+                # Update boss stage based on health
+                if boss_health <= 3 and boss_stage < 2:
+                    boss_stage = 2
+                if boss_health == 1 and boss_stage < 3:
+                    boss_stage = 3
+                boss_hit_timer = 30
+                # Boss stage transitions
+                old_stage = boss_stage
+                if boss_health <= 7:
+                    boss_stage = 2
+                if boss_health <= 3:
+                    boss_stage = 3
+                if boss_stage != old_stage:
+                    shake_timer = 10  # Trigger screen shake
+                reset_ball()
+
+            if boss_health <= 0:
+                end_screen("You Win!")
+                return
+
+            for proj in boss_projectiles:
+                pygame.draw.rect(screen, RED, (proj[0], proj[1], 10, 20))
+
+            if boss_hit_timer > 0:
+                temp_boss = boss_img.copy()
+                temp_boss.fill((255, 0, 0), special_flags=pygame.BLEND_RGB_ADD)
+                screen.blit(temp_boss, (boss_x, boss_y))
+                boss_hit_timer -= 1
+            else:
+                screen.blit(boss_img, (boss_x, boss_y))
+
+            draw_boss_health(boss_health)
+            stage_text = small_font.render(f"Stage: {boss_stage}", True, WHITE)
+            screen.blit(stage_text, (WIDTH - 150, 20))
+
+        screen.blit(ball_img, (ball_x, ball_y))
+        PLAYER_Y_OFFSET = 200
+        screen.blit(player_img, (player_x, HEIGHT - PLAYER_Y_OFFSET))
+        draw_player_health(player_health)
+        if not shooting:
+            ready_text = small_font.render("Press SPACE to shoot!", True, WHITE)
+            screen.blit(ready_text, (WIDTH // 2 - 100, HEIGHT - 60))
+        if player_health <= 0:
+            end_screen("You Lose!")
+            return
+        score_text = small_font.render(f"Score: {score}", True, WHITE)
+        level_text = small_font.render(f"Level: {level if level != 'boss' else 'Boss'}", True, WHITE)
+
+        screen.blit(score_text, (10, 10))
+        screen.blit(level_text, (10, 40))
+
+        # ✅ Add these two lines before updating display
+        draw_volume_slider()
+        handle_volume_slider()
+
+        if isinstance(level, int) and all(t.hit for t in targets):
+            pygame.time.delay(1000)
+            next_level = level + 1
+            if next_level > MAX_LEVEL:
+                end_screen("You Win!")
+                return
+            else:
+                game_loop(next_level)
+                return
+        pygame.display.update()
+        clock.tick(60)
+
+# Main game loop
+while True:
+    selected_level = main_menu()
+    game_loop(selected_level)  
